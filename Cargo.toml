@@ -1,0 +1,18 @@
+[package]
+name = "node_balancer"
+version = "0.1.0"
+authors = ["rxdn"]
+edition = "2018"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+kube = "0.58.1"
+kube-runtime = "0.58.1"
+k8s-openapi = { version = "0.12.0", default-features = false, features = ["v1_19"] }
+log = "0.4"
+env_logger = "0.9"
+thiserror = "1"
+parking_lot = "0.11"
+rand = "0.8"
+futures = "0.3"
+futures-util = "0.3"
