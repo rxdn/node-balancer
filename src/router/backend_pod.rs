@@ -1,14 +1,14 @@
 #[derive(Clone, Debug)]
 pub struct BackendPod {
     pub node: String,
-    pub associated_service: String,
+    pub is_service_backend: bool,
 }
 
 impl BackendPod {
-    pub fn new(node: String, associated_service: String) -> BackendPod {
+    pub fn new(node: String, is_service_backend: bool) -> BackendPod {
         BackendPod {
             node,
-            associated_service,
+            is_service_backend,
         }
     }
 }

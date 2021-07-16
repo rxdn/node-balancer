@@ -1,33 +1,35 @@
-use kube::{Client, Config};
+use kube::{Client, Config as KubeConfig};
 use std::convert::TryFrom;
-use crate::{Result, NodeBalancerError};
+use crate::{Result, NodeBalancerError, Config};
 use crate::router::{AddressableNode, BalancedService, BackendPod};
 use parking_lot::RwLock;
 use rand::seq::SliceRandom;
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 use log::{error, info};
 use std::sync::Arc;
 
 pub struct Router {
+    pub config: Arc<Config>,
     pub(super) client: Client,
     // name -> node
     pub(super) nodes: RwLock<HashMap<String, AddressableNode>>,
     // name -> svc
-    pub(super) services: RwLock<HashMap<String, BalancedService>>,
+    pub(super) service: RwLock<Option<BalancedService>>,
     // name -> pod
     pub(super) pods: RwLock<HashMap<String, BackendPod>>,
     pub(super) pod_names: RwLock<Vec<String>>,
 }
 
 impl Router {
-    pub async fn new() -> Router {
-        let config = Config::infer().await.unwrap();
-        let client = Client::try_from(config).unwrap();
+    pub async fn new(config: Arc<Config>) -> Router {
+        let kube_config = KubeConfig::infer().await.unwrap();
+        let client = Client::try_from(kube_config).unwrap();
 
         Router {
+            config,
             client,
             nodes: RwLock::new(HashMap::new()),
-            services: RwLock::new(HashMap::new()),
+            service: RwLock::new(None),
             pods: RwLock::new(HashMap::new()),
             pod_names: RwLock::new(Vec::new()),
         }
@@ -42,6 +44,7 @@ impl Router {
 
         let pods = self.pods.read();
         let pod = pods.get(pod_name).ok_or(NodeBalancerError::NoPodsAvailable)?;
+        drop(pod_names);
 
         // Get node IP
         let nodes = self.nodes.read();
@@ -49,21 +52,21 @@ impl Router {
         let ip = node_ips.choose(&mut rand::thread_rng()).ok_or_else(|| NodeBalancerError::NoAddressesAvailable(pod.node.clone()))?;
 
         // Get service port
-        let services = self.services.read();
-        let svc = services.get(&pod.associated_service).ok_or_else(|| NodeBalancerError::UnknownService(pod.associated_service.clone()))?;
-        let dest_port = svc.port_map.get(&port).ok_or_else(|| NodeBalancerError::UnknownPort(port, pod.associated_service.clone()))?;
+        // Rust is dumb
+        let lock = self.service.read();
+        let dest_port = lock.as_ref()
+            .ok_or(NodeBalancerError::ServiceNotFound)?
+            .port_map
+            .get(&port)
+            .ok_or_else(|| NodeBalancerError::UnknownPort(port))?;
 
-        drop(pod_names);
         Ok((ip.clone(), *dest_port))
     }
 
     pub async fn seed(&self) -> Result<()> {
         self.seed_nodes().await?;
-        self.seed_services().await?;
-
-        for (service_name, svc) in &*self.services.read() {
-            self.seed_pods(service_name.clone(), svc).await?;
-        }
+        self.seed_service().await?;
+        self.seed_pods().await?;
 
         Ok(())
     }
@@ -124,16 +127,27 @@ impl Router {
         Ok(())
     }
 
-    async fn seed_services(&self) -> Result<()> {
-        let services = self.fetch_services().await?;
-        *self.services.write() = services;
+    async fn seed_service(&self) -> Result<()> {
+        let service = self.fetch_service().await?;
+        *self.service.write() = Some(service);
         Ok(())
     }
 
-    pub(super) async fn seed_pods(&self, service_name: String, svc: &BalancedService) -> Result<()> {
-        let fetched_pods = self.fetch_pods(service_name, &svc.selector).await?;
+    pub(super) async fn seed_pods(&self) -> Result<()> {
+        // Rust compiler is dumb
+        let selector: BTreeMap<String, String>;
+        {
+            selector = self.service.read().clone().expect("cumzone").selector;
+        }
+
+        // Ok to panic, only run on startup and after successful service replacement
+        let fetched_pods = self.fetch_pods(&selector).await?;
+
         let pod_names = &mut self.pod_names.write();
         let pods = &mut self.pods.write();
+
+        pods.clear();
+        pod_names.clear();
 
         fetched_pods.into_iter().for_each(|(pod_name, pod)| {
             pods.insert(pod_name.clone(), pod);

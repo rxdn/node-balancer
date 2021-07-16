@@ -16,3 +16,5 @@ parking_lot = "0.11"
 rand = "0.8"
 futures = "0.3"
 futures-util = "0.3"
+envy = "0.4"
+serde = { version = "1", features = ["derive"] }

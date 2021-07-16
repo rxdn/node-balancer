@@ -16,14 +16,23 @@ pub enum NodeBalancerError {
     #[error("node {0} has no addresses")]
     NoAddressesAvailable(String),
 
-    #[error("service {0} not found")]
-    UnknownService(String),
+    #[error("service not found")]
+    ServiceNotFound,
 
-    #[error("port {0} not found for svc {1}")]
-    UnknownPort(u16, String),
+    #[error("port {0} not found")]
+    UnknownPort(u16),
 
     #[error("kube watcher returned an error: {0}")]
     WatcherError(#[from] kube_runtime::watcher::Error),
+
+    #[error("resource is missing spec")]
+    MissingSpec,
+
+    #[error("service wanted NodePort, got {0}")]
+    WrongServiceType(String),
+
+    #[error("error occurred during IO operation: {0}")]
+    IOError(std::io::Error),
 }
 
 impl<T> Into<Result<T>> for NodeBalancerError {
